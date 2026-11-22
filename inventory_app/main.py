@@ -153,6 +153,9 @@ def init_db() -> None:
             )
             """
         )
+        # Roles: 'admin' (everything) or 'worker' (day-to-day stock work only).
+        # Accounts that existed before roles were added stay admins.
+        add_column(db, "users", "role", "role TEXT NOT NULL DEFAULT 'admin'")
         db.execute("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
         db.execute(
             """
@@ -221,7 +224,7 @@ def init_db() -> None:
         if db.execute("SELECT COUNT(*) FROM users").fetchone()[0] == 0:
             salt = secrets.token_hex(16)
             db.execute(
-                "INSERT INTO users (username, salt, password_hash) VALUES (?, ?, ?)",
+                "INSERT INTO users (username, salt, password_hash, role) VALUES (?, ?, ?, 'admin')",
                 ("admin", salt, hash_password("admin", salt)),
             )
 
@@ -284,6 +287,35 @@ def require_auth(authorization: Optional[str] = Header(None)) -> str:
     return username
 
 
+ROLES = ("admin", "worker")
+
+
+def get_role(username: str) -> Optional[str]:
+    with get_db() as db:
+        row = db.execute("SELECT role FROM users WHERE username = ?", (username,)).fetchone()
+    return row["role"] if row else None
+
+
+def current_role(user: str = Depends(require_auth)) -> str:
+    return get_role(user) or "worker"
+
+
+def require_admin(role: str = Depends(current_role)) -> str:
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Only an admin can do that.")
+    return role
+
+
+ADMIN = [Depends(require_admin)]      # use as: @router.post(..., dependencies=ADMIN)
+
+
+def hide_cost(item: dict, role: str) -> dict:
+    """Workers never see what stock cost: cost is returned as 0."""
+    if role != "admin":
+        item["cost"] = 0
+    return item
+
+
 class LoginIn(BaseModel):
     username: str = Field(..., min_length=1, max_length=64)
     password: str = Field(..., min_length=1, max_length=200)
@@ -323,7 +355,7 @@ def login(body: LoginIn):
 
     _failed_logins.pop(key, None)
     return {"token": make_token(row["username"]), "username": row["username"],
-            "expires_in": TOKEN_TTL}
+            "role": row["role"], "expires_in": TOKEN_TTL}
 
 
 # Everything below requires a valid token
@@ -331,8 +363,8 @@ router = APIRouter(dependencies=[Depends(require_auth)])
 
 
 @router.get("/me")
-def me(user: str = Depends(require_auth)):
-    return {"username": user}
+def me(user: str = Depends(require_auth), role: str = Depends(current_role)):
+    return {"username": user, "role": role}
 
 
 @router.post("/account/password")
@@ -348,6 +380,65 @@ def change_password(body: PasswordChange, user: str = Depends(require_auth)):
             (salt, hash_password(body.new_password, salt), row["id"]),
         )
     return {"status": "updated"}
+
+
+# ---------- User management (admin only) ----------
+class UserIn(BaseModel):
+    username: str = Field(..., min_length=1, max_length=64)
+    password: str = Field(..., min_length=6, max_length=200)
+    role: Literal["admin", "worker"] = "worker"
+
+
+class PasswordReset(BaseModel):
+    new_password: str = Field(..., min_length=6, max_length=200)
+
+
+@router.get("/users", dependencies=ADMIN)
+def list_users():
+    with get_db() as db:
+        rows = db.execute("SELECT id, username, role FROM users ORDER BY role, username").fetchall()
+    return [dict(r) for r in rows]
+
+
+@router.post("/users", status_code=201, dependencies=ADMIN)
+def create_user(body: UserIn):
+    username = body.username.strip()
+    if not username:
+        raise HTTPException(status_code=400, detail="Enter a username")
+    salt = secrets.token_hex(16)
+    with get_db() as db:
+        try:
+            db.execute(
+                "INSERT INTO users (username, salt, password_hash, role) VALUES (?, ?, ?, ?)",
+                (username, salt, hash_password(body.password, salt), body.role),
+            )
+        except sqlite3.IntegrityError:
+            raise HTTPException(status_code=409, detail="That username is already taken")
+    return {"username": username, "role": body.role}
+
+
+@router.post("/users/{username}/password", dependencies=ADMIN)
+def reset_user_password(username: str, body: PasswordReset):
+    salt = secrets.token_hex(16)
+    with get_db() as db:
+        done = db.execute(
+            "UPDATE users SET salt = ?, password_hash = ? WHERE username = ?",
+            (salt, hash_password(body.new_password, salt), username),
+        ).rowcount
+    if done != 1:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {"status": "updated"}
+
+
+@router.delete("/users/{username}", status_code=204, dependencies=ADMIN)
+def delete_user(username: str, me_user: str = Depends(require_auth)):
+    if username.lower() == me_user.lower():
+        raise HTTPException(status_code=400, detail="You cannot delete the account you are signed in with")
+    with get_db() as db:
+        row = db.execute("SELECT role FROM users WHERE username = ?", (username,)).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="User not found")
+        db.execute("DELETE FROM users WHERE username = ?", (username,))
 
 
 # ---------- Schemas ----------
@@ -453,6 +544,7 @@ def list_items(
     search: Optional[str] = Query(None, description="Match on item name or SKU"),
     category: Optional[str] = None,
     low_stock_only: bool = False,
+    role: str = Depends(current_role),
 ):
     query, params = ITEM_SELECT + " WHERE 1=1", []
     if search:
@@ -463,13 +555,13 @@ def list_items(
         params.append(category)
     query += " ORDER BY i.name COLLATE NOCASE"
     with get_db() as db:
-        items = [row_to_item(r) for r in db.execute(query, params).fetchall()]
+        items = [hide_cost(row_to_item(r), role) for r in db.execute(query, params).fetchall()]
     if low_stock_only:
         items = [i for i in items if i["low_stock"]]
     return items
 
 
-@router.post("/items/import")
+@router.post("/items/import", dependencies=ADMIN)
 def import_items(body: ImportIn, user: str = Depends(require_auth)):
     """Bulk-create items from parsed CSV rows. Existing names/SKUs are skipped."""
     created, skipped, errors = 0, [], []
@@ -505,12 +597,12 @@ def import_items(body: ImportIn, user: str = Depends(require_auth)):
 
 
 @router.get("/items/{item_id}", response_model=ItemOut)
-def get_item(item_id: int):
+def get_item(item_id: int, role: str = Depends(current_role)):
     with get_db() as db:
-        return row_to_item(get_or_404(db, item_id))
+        return hide_cost(row_to_item(get_or_404(db, item_id)), role)
 
 
-@router.post("/items", response_model=ItemOut, status_code=201)
+@router.post("/items", response_model=ItemOut, status_code=201, dependencies=ADMIN)
 def create_item(item: ItemIn, user: str = Depends(require_auth)):
     with get_db() as db:
         try:
@@ -520,7 +612,7 @@ def create_item(item: ItemIn, user: str = Depends(require_auth)):
         return row_to_item(get_or_404(db, new_id))
 
 
-@router.put("/items/{item_id}", response_model=ItemOut)
+@router.put("/items/{item_id}", response_model=ItemOut, dependencies=ADMIN)
 def update_item(item_id: int, item: ItemIn, user: str = Depends(require_auth)):
     with get_db() as db:
         old = get_or_404(db, item_id)
@@ -544,7 +636,8 @@ def update_item(item_id: int, item: ItemIn, user: str = Depends(require_auth)):
 
 
 @router.post("/items/{item_id}/adjust", response_model=ItemOut)
-def adjust_stock(item_id: int, body: StockAdjust, user: str = Depends(require_auth)):
+def adjust_stock(item_id: int, body: StockAdjust, user: str = Depends(require_auth),
+                 role: str = Depends(current_role)):
     if body.delta == 0:
         raise HTTPException(status_code=400, detail="Enter a quantity greater than zero")
     with get_db() as db:
@@ -555,10 +648,10 @@ def adjust_stock(item_id: int, body: StockAdjust, user: str = Depends(require_au
         db.execute(f"UPDATE items SET quantity=?, updated_at={NOW} WHERE id=?", (new_qty, item_id))
         log_move(db, item_id, row["name"], body.delta, new_qty,
                  body.reason.strip() or "Adjustment", body.note.strip(), user)
-        return row_to_item(get_or_404(db, item_id))
+        return hide_cost(row_to_item(get_or_404(db, item_id)), role)
 
 
-@router.delete("/items/{item_id}", status_code=204)
+@router.delete("/items/{item_id}", status_code=204, dependencies=ADMIN)
 def delete_item(item_id: int, user: str = Depends(require_auth)):
     with get_db() as db:
         row = get_or_404(db, item_id)
@@ -609,7 +702,7 @@ def list_suppliers():
     return [dict(r) for r in rows]
 
 
-@router.post("/suppliers", status_code=201)
+@router.post("/suppliers", status_code=201, dependencies=ADMIN)
 def create_supplier(body: SupplierIn):
     with get_db() as db:
         try:
@@ -622,7 +715,7 @@ def create_supplier(body: SupplierIn):
         return dict(db.execute("SELECT * FROM suppliers WHERE id = ?", (cur.lastrowid,)).fetchone())
 
 
-@router.put("/suppliers/{supplier_id}")
+@router.put("/suppliers/{supplier_id}", dependencies=ADMIN)
 def update_supplier(supplier_id: int, body: SupplierIn):
     with get_db() as db:
         if db.execute("SELECT 1 FROM suppliers WHERE id = ?", (supplier_id,)).fetchone() is None:
@@ -638,7 +731,7 @@ def update_supplier(supplier_id: int, body: SupplierIn):
         return dict(db.execute("SELECT * FROM suppliers WHERE id = ?", (supplier_id,)).fetchone())
 
 
-@router.delete("/suppliers/{supplier_id}", status_code=204)
+@router.delete("/suppliers/{supplier_id}", status_code=204, dependencies=ADMIN)
 def delete_supplier(supplier_id: int):
     with get_db() as db:
         if db.execute("SELECT 1 FROM suppliers WHERE id = ?", (supplier_id,)).fetchone() is None:
@@ -673,7 +766,7 @@ PO_SELECT = (
 )
 
 
-@router.get("/purchase-orders")
+@router.get("/purchase-orders", dependencies=ADMIN)
 def list_purchase_orders(status: Optional[str] = None):
     query, params = PO_SELECT + " WHERE 1=1", []
     if status:
@@ -684,7 +777,7 @@ def list_purchase_orders(status: Optional[str] = None):
         return [po_to_dict(db, r) for r in db.execute(query, params).fetchall()]
 
 
-@router.post("/purchase-orders", status_code=201)
+@router.post("/purchase-orders", status_code=201, dependencies=ADMIN)
 def create_purchase_order(body: POIn, user: str = Depends(require_auth)):
     if not body.lines:
         raise HTTPException(status_code=400, detail="A purchase order needs at least one line")
@@ -717,7 +810,7 @@ def _open_po_or_error(db, po_id: int) -> sqlite3.Row:
     return row
 
 
-@router.post("/purchase-orders/{po_id}/receive")
+@router.post("/purchase-orders/{po_id}/receive", dependencies=ADMIN)
 def receive_purchase_order(po_id: int, user: str = Depends(require_auth)):
     """Add the ordered quantities to stock and mark the order as received."""
     with get_db() as db:
@@ -743,7 +836,7 @@ def receive_purchase_order(po_id: int, user: str = Depends(require_auth)):
         return po_to_dict(db, db.execute(PO_SELECT + " WHERE p.id = ?", (po_id,)).fetchone())
 
 
-@router.post("/purchase-orders/{po_id}/cancel")
+@router.post("/purchase-orders/{po_id}/cancel", dependencies=ADMIN)
 def cancel_purchase_order(po_id: int):
     with get_db() as db:
         _open_po_or_error(db, po_id)
@@ -751,7 +844,7 @@ def cancel_purchase_order(po_id: int):
         return po_to_dict(db, db.execute(PO_SELECT + " WHERE p.id = ?", (po_id,)).fetchone())
 
 
-@router.get("/reorder-suggestions")
+@router.get("/reorder-suggestions", dependencies=ADMIN)
 def reorder_suggestions():
     """Low-stock items with a suggested order quantity.
 
@@ -781,7 +874,7 @@ def reorder_suggestions():
 
 
 # ---------- Reports ----------
-@router.get("/reports/slow-movers")
+@router.get("/reports/slow-movers", dependencies=ADMIN)
 def slow_movers(days: int = Query(30, ge=1, le=730)):
     """In-stock items with no outbound movement for at least `days` days."""
     with get_db() as db:
@@ -807,7 +900,7 @@ def slow_movers(days: int = Query(30, ge=1, le=730)):
 
 
 @router.get("/stats")
-def stats():
+def stats(role: str = Depends(current_role)):
     with get_db() as db:
         rows = [row_to_item(r) for r in db.execute("SELECT * FROM items").fetchall()]
         open_pos = db.execute(
@@ -815,6 +908,8 @@ def stats():
         ).fetchone()[0]
     cost_value = round(sum(r["quantity"] * r["cost"] for r in rows), 2)
     retail_value = round(sum(r["quantity"] * r["price"] for r in rows), 2)
+    if role != "admin":          # workers do not see what the stock is worth
+        cost_value = retail_value = 0
     return {
         "total_items": len(rows),
         "total_units": sum(r["quantity"] for r in rows),
@@ -880,12 +975,12 @@ def counts_update_line(count_id: int, line_id: int, body: CountLineIn):
                       body.source, body.label, body.confidence)
 
 
-@router.post("/counts/{count_id}/approve")
+@router.post("/counts/{count_id}/approve", dependencies=ADMIN)
 def counts_approve(count_id: int, body: CountApprove, user: str = Depends(require_auth)):
     return count_call(shift_count.approve, count_id, user, log_move, body.allow_uncounted)
 
 
-@router.post("/counts/{count_id}/cancel")
+@router.post("/counts/{count_id}/cancel", dependencies=ADMIN)
 def counts_cancel(count_id: int, user: str = Depends(require_auth)):
     return count_call(shift_count.cancel, count_id, user)
 
@@ -971,7 +1066,7 @@ def references_add(body: ReferenceIn, user: str = Depends(require_auth)):
     return result
 
 
-@router.delete("/references/{ref_id}", status_code=204)
+@router.delete("/references/{ref_id}", status_code=204, dependencies=ADMIN)
 def references_delete(ref_id: int):
     ref_call(references.delete_reference, ref_id)
 

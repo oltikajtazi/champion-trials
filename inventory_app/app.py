@@ -8,6 +8,7 @@ import hashlib
 import html
 import io
 import os
+from urllib.parse import quote
 
 import altair as alt
 import pandas as pd
@@ -23,8 +24,9 @@ st.set_page_config(
 )
 
 ACCENT = "#2563EB"
-PAGES = ["Dashboard", "Inventory", "Add Item", "Manage Stock", "Receive Stock", "Shift Count", "Purchasing",
-         "Activity", "Reports", "Account"]
+ADMIN_PAGES = ["Dashboard", "Inventory", "Add Item", "Manage Stock", "Receive Stock", "Shift Count",
+               "Purchasing", "Activity", "Reports", "Users", "Account"]
+WORKER_PAGES = ["Inventory", "Manage Stock", "Receive Stock", "Shift Count", "Account"]
 
 # Backend address is configured outside the UI (environment variable).
 API_URL = os.environ.get("INVENTORY_API_URL", "http://127.0.0.1:8000").rstrip("/")
@@ -309,7 +311,7 @@ def item_form_fields(defaults: dict, suppliers: list) -> dict:
 
 
 def sign_out(notice: str) -> None:
-    for key in ("token", "user"):
+    for key in ("token", "user", "role"):
         st.session_state.pop(key, None)
     st.session_state["_notice"] = notice
     st.rerun()
@@ -326,6 +328,7 @@ def do_login(username: str, password: str):
         data = resp.json()
         st.session_state["token"] = data["token"]
         st.session_state["user"] = data["username"]
+        st.session_state["role"] = data.get("role", "worker")
         return None
     try:
         return str(resp.json().get("detail", "Sign in failed"))
@@ -370,6 +373,9 @@ if "token" not in st.session_state:
     st.stop()
 
 
+IS_ADMIN = st.session_state.get("role") == "admin"
+
+
 # ---------- Sidebar ----------
 with st.sidebar:
     st.markdown(
@@ -378,7 +384,8 @@ with st.sidebar:
         '</div></div><div class="nav-label">Menu</div>',
         unsafe_allow_html=True,
     )
-    page = st.radio("Navigation", PAGES, label_visibility="collapsed")
+    page = st.radio("Navigation", ADMIN_PAGES if IS_ADMIN else WORKER_PAGES,
+                    label_visibility="collapsed")
     st.write("")
 
 stats, stats_err = api("GET", "/stats")
@@ -395,7 +402,8 @@ with st.sidebar:
             unsafe_allow_html=True,
         )
     user = html.escape(st.session_state.get("user", ""))
-    st.markdown(f'<div class="side-status">Signed in as&nbsp;<b>{user}</b></div>',
+    st.markdown(f'<div class="side-status">Signed in as&nbsp;<b>{user}</b>'
+                f'&nbsp;({"admin" if IS_ADMIN else "worker"})</div>',
                 unsafe_allow_html=True)
     if st.button("Sign out", icon=":material/logout:", key="signout"):
         sign_out("You have been signed out.")
@@ -491,9 +499,12 @@ def page_inventory():
 
     df = items_frame(items)
     st.caption(f"{len(df)} item{'s' if len(df) != 1 else ''}")
+    cols_shown = ["id", "sku", "name", "category", "supplier_name", "quantity", "cost", "price",
+                  "margin", "cost_value", "low_stock_threshold", "status", "updated_at"]
+    if not IS_ADMIN:
+        cols_shown = [c for c in cols_shown if c not in ("cost", "margin", "cost_value")]
     st.dataframe(
-        df[["id", "sku", "name", "category", "supplier_name", "quantity", "cost", "price",
-            "margin", "cost_value", "low_stock_threshold", "status", "updated_at"]],
+        df[cols_shown],
         hide_index=True,
         height=min(600, 38 * (len(df) + 1) + 3),
         column_config={
@@ -508,13 +519,14 @@ def page_inventory():
             "status": "Status", "updated_at": "Last updated",
         },
     )
-    st.download_button(
-        "Export CSV",
-        df[["name", "sku", "category", "quantity", "cost", "price", "low_stock_threshold",
-            "reorder_qty", "supplier_name"]].rename(columns={"supplier_name": "supplier"})
-          .to_csv(index=False),
-        file_name="inventory.csv", mime="text/csv", icon=":material/download:",
-    )
+    if IS_ADMIN:
+        st.download_button(
+            "Export CSV",
+            df[["name", "sku", "category", "quantity", "cost", "price", "low_stock_threshold",
+                "reorder_qty", "supplier_name"]].rename(columns={"supplier_name": "supplier"})
+              .to_csv(index=False),
+            file_name="inventory.csv", mime="text/csv", icon=":material/download:",
+        )
 
 
 def csv_to_rows(raw: pd.DataFrame) -> list:
@@ -626,14 +638,22 @@ def page_manage():
 
     cols = st.columns(4)
     kpi(cols[0], "On hand", f"{item['quantity']:,}", "Units in stock")
-    kpi(cols[1], "Cost / price", f"{money(item['cost'])} / {money(item['price'])}", "Per unit")
-    kpi(cols[2], "Stock value", money(item["quantity"] * item["cost"]), "On hand x cost")
+    if IS_ADMIN:
+        kpi(cols[1], "Cost / price", f"{money(item['cost'])} / {money(item['price'])}", "Per unit")
+        kpi(cols[2], "Stock value", money(item["quantity"] * item["cost"]), "On hand x cost")
+    else:
+        kpi(cols[1], "Price", money(item["price"]), "Per unit")
+        kpi(cols[2], "SKU", item["sku"] or "-", "Item code")
     kpi(cols[3], "Status", stock_status(item), f"Alert at {item['low_stock_threshold']}",
         alert=item["low_stock"])
     st.write("")
 
-    tab_adjust, tab_history, tab_edit, tab_delete = st.tabs(
-        ["Adjust stock", "History", "Edit details", "Delete"])
+    if IS_ADMIN:
+        tab_adjust, tab_history, tab_edit, tab_delete = st.tabs(
+            ["Adjust stock", "History", "Edit details", "Delete"])
+    else:
+        tab_adjust, tab_history = st.tabs(["Adjust stock", "History"])
+        tab_edit = tab_delete = None
 
     with tab_adjust:
         with st.container(border=True):
@@ -665,35 +685,38 @@ def page_manage():
             st.dataframe(movements_frame(moves)[MOVE_COLUMNS], hide_index=True,
                          column_config=MOVE_CONFIG)
 
-    with tab_edit:
-        suppliers = get_suppliers()
-        with st.form(f"edit_{item_id}"):
-            payload = item_form_fields(item, suppliers)
-            saved = st.form_submit_button("Save changes", type="primary")
-        if saved:
-            if not payload["name"]:
-                st.error("Item name is required.")
-            else:
-                _, err = api("PUT", f"/items/{item_id}", json=payload)
-                if err:
-                    st.error(err)
+    if IS_ADMIN:
+        with tab_edit:
+            suppliers = get_suppliers()
+            with st.form(f"edit_{item_id}"):
+                payload = item_form_fields(item, suppliers)
+                saved = st.form_submit_button("Save changes", type="primary")
+            if saved:
+                if not payload["name"]:
+                    st.error("Item name is required.")
                 else:
-                    flash("Changes saved")
-                    st.rerun()
+                    _, err = api("PUT", f"/items/{item_id}", json=payload)
+                    if err:
+                        st.error(err)
+                    else:
+                        flash("Changes saved")
+                        st.rerun()
 
-    with tab_delete:
-        with st.container(border=True):
-            section("Delete item", f"This permanently removes {item['name']} from the inventory. "
-                                   "Its movement history is kept.")
-            confirm = st.checkbox("I understand this cannot be undone")
-            if st.button("Delete item", type="primary", disabled=not confirm,
-                         icon=":material/delete:"):
-                _, err = api("DELETE", f"/items/{item_id}")
-                if err:
-                    st.error(err)
-                else:
-                    flash(f"Deleted {item['name']}")
-                    st.rerun()
+    if IS_ADMIN:
+        with tab_delete:
+            with st.container(border=True):
+                section("Delete item", f"This permanently removes {item['name']} from the inventory. "
+                                       "Its movement history is kept.")
+                confirm = st.checkbox("I understand this cannot be undone")
+                if st.button("Delete item", type="primary", disabled=not confirm,
+                             icon=":material/delete:"):
+                    _, err = api("DELETE", f"/items/{item_id}")
+                    if err:
+                        st.error(err)
+                    else:
+                        flash(f"Deleted {item['name']}")
+                        st.rerun()
+
 
 
 # ----- Receive stock (delivery photos teach the app what products look like) -----
@@ -1001,7 +1024,8 @@ def count_draft_view(draft: dict) -> None:
     kpi(cols[1], "Counted", f"{summ['counted']:,}", f"{summ['uncounted']} still to do",
         alert=summ["uncounted"] > 0)
     kpi(cols[2], "Differences", f"{summ['with_difference']:,}", "Counted vs expected")
-    kpi(cols[3], "Net change", f"{signed(summ['net_units'])} units", f"{money(summ['net_value'])} at cost")
+    kpi(cols[3], "Net change", f"{signed(summ['net_units'])} units",
+        f"{money(summ['net_value'])} at cost" if IS_ADMIN else "Counted vs expected")
     st.write("")
 
     vstat, _ = api("GET", "/vision/status")
@@ -1038,6 +1062,12 @@ def count_draft_view(draft: dict) -> None:
         st.dataframe(df, hide_index=True)
 
     st.write("")
+    if not IS_ADMIN:
+        with st.container(border=True):
+            section("Finish", "Keep counting. An admin reviews the count and approves it to update stock.")
+            if summ["uncounted"] == 0:
+                st.success("Every item is counted. Tell an admin it is ready to approve.")
+        return
     with st.container(border=True):
         section("Finish", "Approving updates your stock and writes every change to the Activity history")
         allow = True
@@ -1097,7 +1127,10 @@ def count_history_view() -> None:
             "Net units": c["summary"]["net_units"], "Net value": c["summary"]["net_value"],
             "Note": c["note"],
         } for c in history]
-        st.dataframe(pd.DataFrame(rows), hide_index=True,
+        history_df = pd.DataFrame(rows)
+        if not IS_ADMIN:
+            history_df = history_df.drop(columns=["Net value"])
+        st.dataframe(history_df, hide_index=True,
                      column_config={"Net value": st.column_config.NumberColumn(format="%.2f")})
         ids = [c["id"] for c in history]
         shown = st.selectbox("Show details for count", [None] + ids,
@@ -1510,6 +1543,71 @@ def page_account():
                 st.rerun()
 
 
+# ----- Users (admin only) -----
+def page_users():
+    header("Users", "Create worker accounts and manage who can sign in")
+    users, err = api("GET", "/users")
+    if err:
+        st.error(err)
+        return
+    me = st.session_state.get("user", "")
+    with st.container(border=True):
+        section("Accounts", "Workers count stock and record deliveries. Admins can do everything.")
+        st.dataframe(pd.DataFrame(users)[["username", "role"]], hide_index=True,
+                     column_config={"username": "Username", "role": "Role"})
+
+    c1, c2 = st.columns(2)
+    with c1, st.container(border=True):
+        section("Add a user")
+        with st.form("new_user", clear_on_submit=True):
+            name = st.text_input("Username")
+            pw = st.text_input("Password", type="password", help="At least 6 characters")
+            role = st.selectbox("Role", ["worker", "admin"])
+            go = st.form_submit_button("Create user", type="primary")
+        if go:
+            if not name.strip() or not pw:
+                st.error("Enter a username and a password.")
+            elif len(pw) < 6:
+                st.error("The password must be at least 6 characters.")
+            else:
+                _, err = api("POST", "/users", json={"username": name.strip(), "password": pw,
+                                                      "role": role})
+                if err:
+                    st.error(err)
+                else:
+                    flash(f"Created {role} account for {name.strip()}")
+                    st.rerun()
+
+    with c2, st.container(border=True):
+        section("Reset a password or remove a user")
+        names = [u["username"] for u in users]
+        target = st.selectbox("User", names)
+        with st.form("reset_pw", clear_on_submit=True):
+            new_pw = st.text_input("New password", type="password", help="At least 6 characters")
+            reset = st.form_submit_button("Reset password")
+        if reset:
+            if len(new_pw) < 6:
+                st.error("The password must be at least 6 characters.")
+            else:
+                _, err = api("POST", f"/users/{quote(target, safe='')}/password",
+                             json={"new_password": new_pw})
+                if err:
+                    st.error(err)
+                else:
+                    flash(f"Password reset for {target}")
+                    st.rerun()
+        sure = st.checkbox(f"Yes, delete {target}")
+        if st.button("Delete user", icon=":material/delete:", disabled=not sure or target == me):
+            _, err = api("DELETE", f"/users/{quote(target, safe='')}")
+            if err:
+                st.error(err)
+            else:
+                flash(f"Deleted {target}")
+                st.rerun()
+        if target == me:
+            st.caption("You cannot delete the account you are signed in with.")
+
+
 {
     "Dashboard": page_dashboard,
     "Inventory": page_inventory,
@@ -1520,5 +1618,6 @@ def page_account():
     "Purchasing": page_purchasing,
     "Activity": page_activity,
     "Reports": page_reports,
+    "Users": page_users,
     "Account": page_account,
 }[page]()

@@ -35,6 +35,15 @@ Sign-in screen, then sidebar navigation: Dashboard, Inventory, Add Item (single 
 Manage Stock, Receive Stock (delivery photos), Shift Count (end-of-shift count), Purchasing (reorder suggestions, purchase orders, suppliers), Activity (audit trail),
 Reports (ABC analysis, slow-moving stock, valuation) and Account (change password).
 
+## Users and roles
+Two roles: **admin** (everything) and **worker** (day-to-day stock work).
+- Workers see Inventory, Manage Stock (adjust + history), Receive Stock, Shift Count and Account. They cannot
+  see costs, margins or stock value, edit or delete items, use Purchasing/Reports/Activity, or approve a count.
+- Admins also manage accounts on the **Users** page (add, reset password, delete).
+- Roles are enforced by the API, not just hidden in the menu.
+- From the command line: `python add_user.py "name" "password" worker` (also resets an existing user).
+- Accounts that existed before roles were added stay admins.
+
 ## Security
 - Default login: `admin` / `admin` (change it on the Account page).
 - Passwords are stored as salted PBKDF2 hashes; sessions use signed tokens that expire after 8 hours.
