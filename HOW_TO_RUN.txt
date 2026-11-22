@@ -1,0 +1,68 @@
+INVENTORY MANAGER - HOW TO RUN
+==============================
+
+LOGINS (starting passwords - change them on the Account page after signing in)
+-------------------------------------------------------------------------------
+  Role     Username        Password
+  admin    admin           admin
+  worker   olti kajtazi    olti kajtazi
+  worker   lisbytyqi       lisbytyqi
+
+  Admin: everything, plus the Users page (add users, reset passwords).
+  Workers: Inventory, Manage Stock, Receive Stock, Shift Count, Account.
+  Only an admin can approve a shift count.
+
+
+EASIEST WAY (Windows)
+---------------------
+Double-click  start.bat  (it is in the inventory_app folder).
+It opens 3 windows: backend, front end, and the phone-link tunnel.
+Find the  https://....trycloudflare.com  link in the "tunnel" window and open it on your phone.
+Close the 3 windows to stop everything.
+
+
+MANUAL WAY - open PowerShell in the inventory_app folder
+--------------------------------------------------------
+Folder:  C:\Users\Student\Desktop\champion trials\inventory_app
+
+First time only:
+    python -m venv venv
+    venv\Scripts\activate
+    pip install -r requirements.txt
+
+Window 1 - backend (start this first):
+    venv\Scripts\activate
+    uvicorn main:app --reload
+
+Window 2 - front end:
+    venv\Scripts\activate
+    streamlit run app.py
+    -> opens http://localhost:8501 on this computer
+
+Window 3 - phone link (Cloudflare tunnel):
+    & "C:\Users\Student\Downloads\cloudflared-windows-amd64.exe" tunnel --url http://localhost:8501
+    (if "cloudflared" works on its own you can use:  cloudflared tunnel --url http://localhost:8501)
+    -> prints a link like https://something-random.trycloudflare.com  - open it on your phone.
+    -> the link changes every time you restart the tunnel.
+
+
+IMPORTANT
+---------
+- The command must start with  cloudflared  (or the full path in quotes with & in front).
+  Typing only  tunnel --url ...  does NOT work.
+- Start order: backend, then front end, then tunnel.
+- Keep all windows open while you use the app. The computer must stay on.
+- Only tunnel port 8501. Never tunnel port 8000.
+- Anyone with the link can see the sign-in page: change the default passwords and do not
+  share the link publicly.
+
+
+PROBLEMS
+--------
+"Cannot reach the server"      -> backend (window 1) is not running.
+Cloudflare error page          -> front end (window 2) is not running, or wait 30 s and refresh.
+"uvicorn not recognized"       -> run  python -m uvicorn main:app --reload
+Port already in use            -> close the old windows, then start again.
+Locked out                     -> 5 wrong passwords block that user for 60 seconds.
+Forgot a password              -> admin resets it on the Users page, or run:
+                                  python add_user.py "username" "newpassword" worker

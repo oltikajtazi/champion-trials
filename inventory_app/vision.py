@@ -151,7 +151,7 @@ def annotate(image: Image.Image, detections: list) -> str:
         tag = f"{n} {d['label']}" if d.get("label") else f"{n}"
         tw = 7 * len(tag) + 6
         unknown = d.get("label") == UNRECOGNIZED
-        colour = (220, 38, 38) if unknown else (37, 99, 235)
+        colour = (220, 38, 38) if unknown else (85, 107, 47)
         draw.rectangle([x1, y1, x2, y2], outline=colour, width=width)
         draw.rectangle([x1, y1, x1 + tw, y1 + 16], fill=colour)
         draw.text((x1 + 3, y1 + 2), tag, fill=(255, 255, 255))

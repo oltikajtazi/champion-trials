@@ -23,7 +23,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-ACCENT = "#2563EB"
+ACCENT = "#556B2F"
 ADMIN_PAGES = ["Dashboard", "Inventory", "Add Item", "Manage Stock", "Receive Stock", "Shift Count",
                "Purchasing", "Activity", "Reports", "Users", "Account"]
 WORKER_PAGES = ["Inventory", "Manage Stock", "Receive Stock", "Shift Count", "Account"]
@@ -35,33 +35,46 @@ CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
+:root {
+    --olive: #556B2F;        /* main olive green */
+    --olive-dark: #3F5120;
+    --olive-mid: #6B7F3A;
+    --olive-soft: #F4F6EC;   /* very pale olive tint */
+    --olive-line: #E1E5D0;   /* borders */
+    --brown: #7B4B2A;        /* buttons */
+    --brown-dark: #62391F;
+    --ink: #232B14;
+    --muted: #6B7360;
+}
+
 html, body, .stApp, .stMarkdown, button, input, textarea, select {
     font-family: 'Inter', -apple-system, 'Segoe UI', sans-serif;
 }
+.stApp { background: #FFFFFF; color: var(--ink); }
 #MainMenu, footer, .stDeployButton { visibility: hidden; }
 header[data-testid="stHeader"] { background: transparent; }
 .block-container { padding-top: 2.2rem; padding-bottom: 3rem; max-width: 1280px; }
 
 /* ---------- Sidebar ---------- */
 section[data-testid="stSidebar"] {
-    background: #0F172A;
+    background: var(--olive);
     border-right: none;
 }
 section[data-testid="stSidebar"] > div { padding-top: 1.2rem; }
-section[data-testid="stSidebar"] * { color: #CBD5E1; }
-section[data-testid="stSidebar"] input { color: #0F172A !important; }
+section[data-testid="stSidebar"] * { color: #EEF1E0; }
+section[data-testid="stSidebar"] input { color: var(--ink) !important; }
 
 .brand { display: flex; align-items: center; gap: 12px; padding: 4px 6px 22px 6px; }
 .brand .logo {
-    width: 38px; height: 38px; border-radius: 10px; background: #2563EB;
+    width: 38px; height: 38px; border-radius: 10px; background: var(--brown);
     display: flex; align-items: center; justify-content: center;
     font-weight: 700; font-size: 14px; color: #fff !important; letter-spacing: .04em;
 }
-.brand .name { font-size: 15px; font-weight: 600; color: #F8FAFC !important; line-height: 1.2; }
-.brand .sub { font-size: 12px; color: #64748B !important; }
+.brand .name { font-size: 15px; font-weight: 600; color: #FFFFFF !important; line-height: 1.2; }
+.brand .sub { font-size: 12px; color: #C9D3A8 !important; }
 .nav-label {
     font-size: 11px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase;
-    color: #64748B !important; padding: 0 8px 8px 8px;
+    color: #C9D3A8 !important; padding: 0 8px 8px 8px;
 }
 
 section[data-testid="stSidebar"] div[role="radiogroup"] { gap: 4px; }
@@ -69,54 +82,84 @@ section[data-testid="stSidebar"] div[role="radiogroup"] > label {
     width: 100%; padding: 10px 14px; border-radius: 8px; cursor: pointer;
     transition: background .15s ease;
 }
-section[data-testid="stSidebar"] div[role="radiogroup"] > label:hover { background: #1E293B; }
+section[data-testid="stSidebar"] div[role="radiogroup"] > label:hover { background: var(--olive-mid); }
 section[data-testid="stSidebar"] div[role="radiogroup"] > label > div:first-child { display: none; }
-section[data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:checked) { background: #2563EB; }
+section[data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:checked) { background: #FFFFFF; }
 section[data-testid="stSidebar"] div[role="radiogroup"] > label:has(input:checked) * {
-    color: #FFFFFF !important; font-weight: 600;
+    color: var(--olive-dark) !important; font-weight: 600;
 }
 section[data-testid="stSidebar"] .stButton > button {
-    width: 100%; background: transparent; border: 1px solid #334155; justify-content: center;
+    width: 100%; background: transparent; border: 1px solid #A3B07A; justify-content: center;
 }
 section[data-testid="stSidebar"] .stButton > button:hover {
-    background: #1E293B; border-color: #475569;
+    background: var(--olive-mid); border-color: #C9D3A8;
 }
 .side-status {
     display: flex; align-items: center; gap: 8px; font-size: 12.5px;
-    padding: 10px 8px; margin-top: 8px; border-top: 1px solid #1E293B;
+    padding: 10px 8px; margin-top: 8px; border-top: 1px solid var(--olive-mid);
 }
 .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
-.dot.ok { background: #22C55E; }
+.dot.ok { background: #BEF264; }
 .dot.bad { background: #EF4444; }
 
 /* ---------- Page header ---------- */
-.page-title { font-size: 26px; font-weight: 700; color: #0F172A; margin: 0; letter-spacing: -.01em; }
-.page-sub { font-size: 14px; color: #64748B; margin: 4px 0 24px 0; }
-.section-title { font-size: 15px; font-weight: 600; color: #0F172A; margin: 0 0 2px 0; }
-.section-sub { font-size: 12.5px; color: #64748B; margin: 0 0 12px 0; }
+.page-title { font-size: 26px; font-weight: 700; color: var(--ink); margin: 0; letter-spacing: -.01em; }
+.page-sub { font-size: 14px; color: var(--muted); margin: 4px 0 24px 0; }
+.section-title { font-size: 15px; font-weight: 600; color: var(--ink); margin: 0 0 2px 0; }
+.section-sub { font-size: 12.5px; color: var(--muted); margin: 0 0 12px 0; }
 
 /* ---------- KPI cards ---------- */
 .kpi {
-    background: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 12px;
-    padding: 18px 20px; height: 100%;
+    background: #FFFFFF; border: 1px solid var(--olive-line); border-top: 3px solid var(--olive);
+    border-radius: 12px; padding: 18px 20px; height: 100%;
 }
 .kpi .label {
     font-size: 11.5px; font-weight: 600; letter-spacing: .06em;
-    text-transform: uppercase; color: #64748B;
+    text-transform: uppercase; color: var(--muted);
 }
-.kpi .value { font-size: 28px; font-weight: 700; color: #0F172A; margin-top: 8px; line-height: 1.1; }
-.kpi .sub { font-size: 12.5px; color: #94A3B8; margin-top: 6px; }
-.kpi.alert .value { color: #B45309; }
-.kpi.alert { border-left: 3px solid #F59E0B; }
+.kpi .value { font-size: 28px; font-weight: 700; color: var(--ink); margin-top: 8px; line-height: 1.1; }
+.kpi .sub { font-size: 12.5px; color: #8E957F; margin-top: 6px; }
+.kpi.alert .value { color: #A0522D; }
+.kpi.alert { border-top-color: #A0522D; }
 
 /* ---------- Containers ---------- */
-div[data-testid="stVerticalBlockBorderWrapper"] { border-radius: 12px; border-color: #E5E7EB; background: #FFFFFF; }
+div[data-testid="stVerticalBlockBorderWrapper"] {
+    border-radius: 12px; border-color: var(--olive-line); background: #FFFFFF;
+}
 div[data-testid="stForm"] {
-    background: #FFFFFF; border: 1px solid #E5E7EB; border-radius: 12px; padding: 24px;
+    background: #FFFFFF; border: 1px solid var(--olive-line); border-radius: 12px; padding: 24px;
 }
 div[data-testid="stTabs"] button[role="tab"] { font-weight: 500; }
+div[data-testid="stTabs"] button[role="tab"][aria-selected="true"] { color: var(--olive); }
+div[data-baseweb="tab-highlight"] { background-color: var(--olive) !important; }
+
+/* ---------- Buttons ---------- */
 .stButton > button, .stDownloadButton > button, .stFormSubmitButton > button {
     border-radius: 8px; font-weight: 500;
+}
+/* main actions: brown */
+button[data-testid="stBaseButton-primary"], button[data-testid="stBaseButton-primaryFormSubmit"],
+button[kind="primary"], button[kind="primaryFormSubmit"] {
+    background: var(--brown); border: 1px solid var(--brown); color: #FFFFFF;
+}
+button[data-testid="stBaseButton-primary"]:hover, button[data-testid="stBaseButton-primaryFormSubmit"]:hover,
+button[kind="primary"]:hover, button[kind="primaryFormSubmit"]:hover {
+    background: var(--brown-dark); border-color: var(--brown-dark); color: #FFFFFF;
+}
+button[data-testid="stBaseButton-primary"] *, button[data-testid="stBaseButton-primaryFormSubmit"] *,
+button[kind="primary"] *, button[kind="primaryFormSubmit"] * { color: #FFFFFF !important; }
+button[data-testid="stBaseButton-primary"]:disabled, button[data-testid="stBaseButton-primaryFormSubmit"]:disabled {
+    background: #CDBBAE; border-color: #CDBBAE;
+}
+/* everything else: olive outline */
+section.main button[data-testid="stBaseButton-secondary"], section.main button[data-testid="stBaseButton-secondaryFormSubmit"],
+div[data-testid="stMain"] button[data-testid="stBaseButton-secondary"],
+div[data-testid="stMain"] button[data-testid="stBaseButton-secondaryFormSubmit"] {
+    border: 1px solid var(--olive); color: var(--olive-dark); background: #FFFFFF;
+}
+div[data-testid="stMain"] button[data-testid="stBaseButton-secondary"]:hover,
+div[data-testid="stMain"] button[data-testid="stBaseButton-secondaryFormSubmit"]:hover {
+    background: var(--olive-soft); border-color: var(--olive-dark); color: var(--olive-dark);
 }
 </style>
 """
@@ -126,13 +169,13 @@ LOGIN_CSS = """
 section[data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"] { display: none; }
 .login-brand { display: flex; align-items: center; gap: 12px; margin-bottom: 28px; }
 .login-brand .logo {
-    width: 42px; height: 42px; border-radius: 11px; background: #2563EB; color: #fff;
+    width: 42px; height: 42px; border-radius: 11px; background: #7B4B2A; color: #fff;
     display: flex; align-items: center; justify-content: center;
     font-weight: 700; font-size: 15px; letter-spacing: .04em;
 }
-.login-brand .name { font-size: 17px; font-weight: 600; color: #0F172A; }
-.login-title { font-size: 24px; font-weight: 700; color: #0F172A; margin: 0 0 4px 0; }
-.login-sub { font-size: 14px; color: #64748B; margin: 0 0 18px 0; }
+.login-brand .name { font-size: 17px; font-weight: 600; color: #232B14; }
+.login-title { font-size: 24px; font-weight: 700; color: #232B14; margin: 0 0 4px 0; }
+.login-sub { font-size: 14px; color: #6B7360; margin: 0 0 18px 0; }
 .stFormSubmitButton > button { width: 100%; }
 </style>
 """
@@ -211,7 +254,7 @@ def bar_chart(df: pd.DataFrame, category: str, value: str, fmt: str, color: str 
         mark
         .encode(
             **({"color": alt.Color(f"{color}:N", title="Class", scale=alt.Scale(
-                domain=["A", "B", "C"], range=[ACCENT, "#60A5FA", "#CBD5E1"]))} if color else {}),
+                domain=["A", "B", "C"], range=[ACCENT, "#A3B18A", "#D6DAC3"]))} if color else {}),
             y=alt.Y(f"{category}:N", sort="-x", title=None, axis=alt.Axis(labelLimit=200)),
             x=alt.X(f"{value}:Q", title=None,
                     axis=alt.Axis(format=fmt, gridColor="#EEF1F5")),
