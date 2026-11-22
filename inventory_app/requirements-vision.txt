@@ -1,0 +1,4 @@
+# Optional: photo counting and product recognition. Large download (installs PyTorch).
+-r requirements.txt
+ultralytics>=8.3
+transformers>=4.40
